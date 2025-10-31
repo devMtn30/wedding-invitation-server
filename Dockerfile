@@ -1,28 +1,27 @@
-# syntax=docker/dockerfile:1  
-# Build stage  
-FROM golang:1.18 AS builder  
-  
-# Set the working directory inside the container  
-WORKDIR /workspace  
-  
-# Copy go module files and download dependencies  
-COPY go.mod go.sum ./  
-RUN go mod download  
-  
-# Copy the rest of the source code  
-COPY . .  
-  
-# Build the Go application for Linux  
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o server .  
-  
-# Final stage: use a minimal distroless base image  
-FROM gcr.io/distroless/base-debian11  
-  
-# Copy the statically linked binary from the builder stage  
-COPY --from=builder /workspace/server /server  
-  
-# Expose the port that the server listens on  
-EXPOSE 8080  
-  
-# Command to run the binary  
+# syntax=docker/dockerfile:1
+
+############################
+# Build stage
+############################
+FROM golang:1.22 AS builder
+WORKDIR /workspace
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+
+# CGO 비활성화 + 정적 링크 빌드
+ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
+RUN go build -tags 'sqlite_omit_load_extension' -o server .
+
+############################
+# Runtime stage
+############################
+FROM gcr.io/distroless/static-debian11
+
+WORKDIR /
+COPY --from=builder /workspace/server /server
+
+EXPOSE 8080
 ENTRYPOINT ["/server"]

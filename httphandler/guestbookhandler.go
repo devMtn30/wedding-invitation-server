@@ -32,7 +32,7 @@ func (h *GuestbookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		guestbook, err := sqldb.GetGuestbook(offset, limit)
+		guestbook, err := sqldb.GetGuestbook(r.Context(), offset, limit)
 
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -66,7 +66,7 @@ func (h *GuestbookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		err = sqldb.CreateGuestbookPost(post.Name, post.Content, post.Password)
+		err = sqldb.CreateGuestbookPost(r.Context(), post.Name, post.Content, post.Password)
 
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -85,7 +85,7 @@ func (h *GuestbookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		err = sqldb.DeleteGuestbookPost(post.Id, post.Password)
+		err = sqldb.DeleteGuestbookPost(r.Context(), post.Id, post.Password)
 
 		if err != nil {
 			if err.Error() == "INCORRECT_PASSWORD" {

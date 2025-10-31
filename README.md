@@ -40,3 +40,12 @@ cp .env.example .env
    ```bash
    go run app.go
    ```
+
+## API 엔드포인트
+
+- `/guestbook`
+  - `GET`: `offset`, `limit` 쿼리 파라미터로 방명록 목록 조회
+  - `POST`: `name`, `content`, `password` 본문으로 방명록 작성
+  - `PUT`: `id`, `password` 본문으로 방명록 삭제(비활성화)
+- `/attendance`
+  - `POST`: `side`, `name`, `meal`, `count` 본문으로 참석 정보 등록

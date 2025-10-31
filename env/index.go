@@ -1,21 +1,16 @@
 package env
 
-import (
-	"fmt"
-	"os"
+import "os"
 
-	"github.com/joho/godotenv"
-)
-
-var AdminPassword string
-var AllowOrigin string
-
-func init() {
-	err := godotenv.Load()
-	if err != nil {
-		fmt.Println("Error: Cannot read .env file")
-		panic(err.Error())
+func getEnv(key, fallback string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
 	}
-	AdminPassword = os.Getenv("ADMIN_PASSWORD")
-	AllowOrigin = os.Getenv("ALLOW_ORIGIN")
+	return fallback
 }
+
+var (
+	AdminPassword = getEnv("ADMIN_PASSWORD", "asdf")
+	AllowOrigin   = getEnv("ALLOW_ORIGIN", "https://devmtn30.github.io")
+	GCPProjectID  = os.Getenv("GCP_PROJECT_ID")
+)

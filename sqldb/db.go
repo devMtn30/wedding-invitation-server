@@ -1,25 +1,23 @@
 package sqldb
 
 import (
-	"database/sql"
+	"cloud.google.com/go/firestore"
 )
 
 var (
-	sqlDb *sql.DB
+	firestoreClient *firestore.Client
 )
 
-func SetDb(db *sql.DB) {
-	sqlDb = db
-	err := initializeGuestbookTable()
-	if err != nil {
+func SetClient(client *firestore.Client) {
+	firestoreClient = client
+	if err := initializeGuestbookTable(); err != nil {
 		panic(err)
 	}
-	err = initializeAttendanceTable()
-	if err != nil {
+	if err := initializeAttendanceTable(); err != nil {
 		panic(err)
 	}
 }
 
-func GetDb() *sql.DB {
-	return sqlDb
+func getClient() *firestore.Client {
+	return firestoreClient
 }

@@ -1,176 +1,258 @@
 package sqldb
 
 import (
+	"context"
 	"fmt"
+	"strconv"
 	"time"
 
+	"cloud.google.com/go/firestore"
 	"github.com/juhonamnam/wedding-invitation-server/env"
 	"github.com/juhonamnam/wedding-invitation-server/types"
 	"github.com/juhonamnam/wedding-invitation-server/util"
+	"google.golang.org/api/iterator"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func initializeGuestbookTable() error {
-	_, err := sqlDb.Exec(`
-		CREATE TABLE IF NOT EXISTS guestbook (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name VARCHAR(20),
-			content VARCHAR(200),
-			password VARCHAR(20),
-			timestamp INTEGER,
-			valid BOOLEAN DEFAULT TRUE
-		)
-	`)
-	if err != nil {
-		return err
-	}
-
-	_, err = sqlDb.Exec(`
-		CREATE INDEX IF NOT EXISTS guestbook_timestamp
-		ON guestbook (timestamp)
-	`)
-
-	if err != nil {
-		return err
-	}
-
-	_, err = sqlDb.Exec(`
-		CREATE INDEX IF NOT EXISTS guestbook_valid
-		ON guestbook (valid)
-	`)
-
-	return err
+	return nil
 }
 
-func GetGuestbook(offset, limit int) (*types.GuestbookGetResponse, error) {
-	rows, err := sqlDb.Query(`
-		SELECT id, name, content, timestamp
-		FROM guestbook
-		WHERE valid = TRUE
-		ORDER BY timestamp DESC
-		LIMIT ? OFFSET ?
-	`, limit, offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+type guestbookRecord struct {
+	ID        int    `firestore:"id"`
+	Name      string `firestore:"name"`
+	Content   string `firestore:"content"`
+	Password  string `firestore:"password"`
+	Timestamp int64  `firestore:"timestamp"`
+	Valid     bool   `firestore:"valid"`
+}
 
-	total, err := sqlDb.Query(`
-		SELECT COUNT(*)
-		FROM guestbook
-		WHERE valid = TRUE
-	`)
-	if err != nil {
-		return nil, err
+func GetGuestbook(ctx context.Context, offset, limit int) (*types.GuestbookGetResponse, error) {
+	client := getClient()
+	if client == nil {
+		return nil, fmt.Errorf("firestore client not initialized")
 	}
-	defer total.Close()
 
-	guestbookGetResponse := &types.GuestbookGetResponse{
+	query := client.Collection("guestbook").
+		Where("valid", "==", true).
+		OrderBy("timestamp", firestore.Desc).
+		Offset(offset).
+		Limit(limit)
+
+	iter := query.Documents(ctx)
+	defer iter.Stop()
+
+	response := &types.GuestbookGetResponse{
 		Posts: []types.GuestbookPostForGet{},
 	}
 
-	for total.Next() {
-		err = total.Scan(&guestbookGetResponse.Total)
-
+	for {
+		doc, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
 		if err != nil {
 			return nil, err
 		}
-	}
 
-	for rows.Next() {
-		guestbookPost := types.GuestbookPostForGet{}
-		err := rows.Scan(&guestbookPost.Id, &guestbookPost.Name, &guestbookPost.Content, &guestbookPost.Timestamp)
-		if err != nil {
+		var record guestbookRecord
+		if err := doc.DataTo(&record); err != nil {
 			return nil, err
 		}
-		guestbookGetResponse.Posts = append(guestbookGetResponse.Posts, guestbookPost)
+
+		response.Posts = append(response.Posts, types.GuestbookPostForGet{
+			Id:        record.ID,
+			Name:      record.Name,
+			Content:   record.Content,
+			Timestamp: uint64(record.Timestamp),
+		})
 	}
 
-	return guestbookGetResponse, nil
+	total, err := countGuestbook(ctx, client)
+	if err != nil {
+		return nil, err
+	}
+	response.Total = total
+
+	return response, nil
 }
 
-func CreateGuestbookPost(name, content, password string) error {
+func countGuestbook(ctx context.Context, client *firestore.Client) (int, error) {
+	iter := client.Collection("guestbook").
+		Where("valid", "==", true).
+		Documents(ctx)
+	defer iter.Stop()
+
+	total := 0
+	for {
+		_, err := iter.Next()
+		if err == iterator.Done {
+			break
+		}
+		if err != nil {
+			return 0, err
+		}
+		total++
+	}
+
+	return total, nil
+}
+
+func CreateGuestbookPost(ctx context.Context, name, content, password string) error {
+	client := getClient()
+	if client == nil {
+		return fmt.Errorf("firestore client not initialized")
+	}
+
 	phash, err := util.HashPassword(password)
 	if err != nil {
 		return err
 	}
 
-	result, err := sqlDb.Exec(`
-		INSERT INTO guestbook (name, content, password, timestamp)
-		VALUES (?, ?, ?, ?)
-	`, name, content, phash, time.Now().Unix())
-	if err != nil {
-		fmt.Println(err)
-		return err
-	}
-
-	rowsAffected, err := result.RowsAffected()
+	id, err := nextID(ctx, "guestbook")
 	if err != nil {
 		return err
 	}
 
-	if rowsAffected == 0 {
-		return fmt.Errorf("NO_ROWS_AFFECTED")
+	record := guestbookRecord{
+		ID:        id,
+		Name:      name,
+		Content:   content,
+		Password:  phash,
+		Timestamp: time.Now().Unix(),
+		Valid:     true,
 	}
 
-	return nil
+	docRef := client.Collection("guestbook").Doc(strconv.Itoa(id))
+	_, err = docRef.Set(ctx, record)
+	return err
 }
 
-func DeleteGuestbookPost(id int, password string) error {
+func DeleteGuestbookPost(ctx context.Context, id int, password string) error {
+	client := getClient()
+	if client == nil {
+		return fmt.Errorf("firestore client not initialized")
+	}
+
+	docRef := client.Collection("guestbook").Doc(strconv.Itoa(id))
+	snap, err := docRef.Get(ctx)
+	if status.Code(err) == codes.NotFound {
+		return fmt.Errorf("NO_GUESTBOOK_POST_FOUND")
+	}
+	if err != nil {
+		return err
+	}
+
+	var record guestbookRecord
+	if err := snap.DataTo(&record); err != nil {
+		return err
+	}
+
+	if !record.Valid {
+		return fmt.Errorf("NO_GUESTBOOK_POST_FOUND")
+	}
+
 	passwordMatch := false
 	if env.AdminPassword != "" && env.AdminPassword == password {
 		passwordMatch = true
-	} else {
-		guestbook, err := sqlDb.Query(`
-		SELECT password
-		FROM guestbook
-		WHERE id = ? AND valid = TRUE
-	`, id)
-		if err != nil {
-			return err
-		}
-		defer guestbook.Close()
-
-		phash := ""
-
-		for guestbook.Next() {
-			err = guestbook.Scan(&phash)
-
-			if err != nil {
-				return err
-			}
-		}
-
-		if phash == "" {
-			return fmt.Errorf("NO_GUESTBOOK_POST_FOUND")
-		}
-
-		if util.CheckPasswordHash(password, phash) {
-			passwordMatch = true
-		}
+	} else if util.CheckPasswordHash(password, record.Password) {
+		passwordMatch = true
 	}
 
 	if !passwordMatch {
 		return fmt.Errorf("INCORRECT_PASSWORD")
 	}
 
-	result, err := sqlDb.Exec(`
-		UPDATE guestbook
-		SET valid = FALSE
-		WHERE id = ?
-	`, id)
+	_, err = docRef.Set(ctx, map[string]interface{}{
+		"valid": false,
+	}, firestore.MergeAll)
+	return err
+}
 
+func UpdateGuestbookPost(ctx context.Context, id int, name, content string, password *string) error {
+	client := getClient()
+	if client == nil {
+		return fmt.Errorf("firestore client not initialized")
+	}
+
+	docRef := client.Collection("guestbook").Doc(strconv.Itoa(id))
+	_, err := docRef.Get(ctx)
+	if status.Code(err) == codes.NotFound {
+		return fmt.Errorf("NO_GUESTBOOK_POST_FOUND")
+	}
 	if err != nil {
 		return err
 	}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return err
+	var updates = map[string]interface{}{
+		"name":    name,
+		"content": content,
 	}
 
-	if rowsAffected == 0 {
-		return fmt.Errorf("NO_ROWS_AFFECTED")
+	if password != nil {
+		if *password == "" {
+			updates["password"] = ""
+		} else {
+			hash, err := util.HashPassword(*password)
+			if err != nil {
+				return err
+			}
+			updates["password"] = hash
+		}
 	}
 
-	return nil
+	_, err = docRef.Set(ctx, updates, firestore.MergeAll)
+	return err
+}
+
+func ImportGuestbook(ctx context.Context, data *types.GuestbookImport) (int, error) {
+	if data == nil || len(data.Posts) == 0 {
+		return 0, nil
+	}
+
+	client := getClient()
+	if client == nil {
+		return 0, fmt.Errorf("firestore client not initialized")
+	}
+
+	batch := client.Batch()
+	maxID := 0
+	for _, post := range data.Posts {
+		record := guestbookRecord{
+			ID:        post.ID,
+			Name:      post.Name,
+			Content:   post.Content,
+			Password:  "",
+			Timestamp: int64(post.Timestamp),
+			Valid:     true,
+		}
+
+		if post.Password != "" {
+			hash, err := util.HashPassword(post.Password)
+			if err != nil {
+				return 0, err
+			}
+			record.Password = hash
+		}
+
+		docRef := client.Collection("guestbook").Doc(strconv.Itoa(post.ID))
+		batch.Set(docRef, record)
+
+		if post.ID > maxID {
+			maxID = post.ID
+		}
+	}
+
+	if _, err := batch.Commit(ctx); err != nil {
+		return 0, err
+	}
+
+	if maxID > 0 {
+		if err := ensureCounterAtLeast(ctx, "guestbook", maxID); err != nil {
+			return len(data.Posts), err
+		}
+	}
+
+	return len(data.Posts), nil
 }

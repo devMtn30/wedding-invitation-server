@@ -13,24 +13,26 @@ type AttendanceHandler struct {
 }
 
 func (h *AttendanceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-		decoder := json.NewDecoder(r.Body)
+	switch r.Method {
+	case http.MethodPost:
 		var attendance types.AttendanceCreate
-		err := decoder.Decode(&attendance)
+		err := json.NewDecoder(r.Body).Decode(&attendance)
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("BadRequest"))
 			return
 		}
 
-		if err != nil {
+		if _, err := sqldb.CreateAttendance(r.Context(), attendance.Side, attendance.Name, attendance.Meal, attendance.Count); err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte("InternalServerError"))
 			return
 		}
 
-		err = sqldb.CreateAttendance(attendance.Side, attendance.Name, attendance.Meal, attendance.Count)
-
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+	case http.MethodGet:
+		attendances, err := sqldb.ListAttendances(r.Context())
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte("InternalServerError"))
@@ -38,7 +40,8 @@ func (h *AttendanceHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-	} else {
+		json.NewEncoder(w).Encode(attendances)
+	default:
 		w.WriteHeader(http.StatusMethodNotAllowed)
 		w.Write([]byte("Method Not Allowed"))
 	}
