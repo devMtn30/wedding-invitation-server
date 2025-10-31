@@ -21,30 +21,26 @@ func (h *GuestbookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		offset, err := strconv.Atoi(offsetQ)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("Bad Request"))
+			writeError(w, http.StatusBadRequest, err)
 			return
 		}
 		limit, err := strconv.Atoi(limitQ)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("Bad Request"))
+			writeError(w, http.StatusBadRequest, err)
 			return
 		}
 
 		guestbook, err := sqldb.GetGuestbook(r.Context(), offset, limit)
 
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Internal Server Error"))
+			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
 
 		pbytes, err := json.Marshal(guestbook)
 
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("Internal Server Error"))
+			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -55,22 +51,14 @@ func (h *GuestbookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var post types.GuestbookPostForCreate
 		err := decoder.Decode(&post)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("BadRequest"))
-			return
-		}
-
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("InternalServerError"))
+			writeError(w, http.StatusBadRequest, err)
 			return
 		}
 
 		err = sqldb.CreateGuestbookPost(r.Context(), post.Name, post.Content, post.Password)
 
 		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte("InternalServerError"))
+			writeError(w, http.StatusInternalServerError, err)
 			return
 		}
 
@@ -80,8 +68,7 @@ func (h *GuestbookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		var post types.GuestbookPostForDelete
 		err := decoder.Decode(&post)
 		if err != nil {
-			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("BadRequest"))
+			writeError(w, http.StatusBadRequest, err)
 			return
 		}
 
@@ -89,18 +76,15 @@ func (h *GuestbookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		if err != nil {
 			if err.Error() == "INCORRECT_PASSWORD" {
-				w.WriteHeader(http.StatusForbidden)
-				w.Write([]byte("Forbidden"))
+				writeError(w, http.StatusForbidden, err)
 			} else {
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte("InternalServerError"))
+				writeError(w, http.StatusInternalServerError, err)
 			}
 			return
 		}
 
 		w.Header().Set("Content-Type", "application/json")
 	} else {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		w.Write([]byte("Method Not Allowed"))
+		writeError(w, http.StatusMethodNotAllowed, nil)
 	}
 }
